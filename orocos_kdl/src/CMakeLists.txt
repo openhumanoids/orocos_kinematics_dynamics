@@ -1,22 +1,29 @@
-FILE( GLOB KDL_SRCS [^.]*.cpp )
-FILE( GLOB KDL_HPPS [^.]*.hpp [^.]*.inl)
+file( GLOB KDL_SRCS [^.]*.cpp )
+file( GLOB KDL_HPPS [^.]*.hpp [^.]*.inl)
 
-FILE( GLOB UTIL_SRCS utilities/[^.]*.cpp utilities/[^.]*.cxx)
-FILE( GLOB UTIL_HPPS utilities/[^.]*.h utilities/[^.]*.hpp)
+file( GLOB UTIL_SRCS utilities/[^.]*.cpp utilities/[^.]*.cxx)
+file( GLOB UTIL_HPPS utilities/[^.]*.h utilities/[^.]*.hpp)
 
-ADD_LIBRARY(orocos-kdl SHARED ${KDL_SRCS} ${UTIL_SRCS})
-SET_TARGET_PROPERTIES( orocos-kdl PROPERTIES
-  SOVERSION "${KDL_VERSION_MAJOR}.${KDL_VERSION_MINOR}"
-  VERSION "${KDL_VERSION}"
-  COMPILE_FLAGS "${CMAKE_CXX_FLAGS_ADD} ${KDL_CFLAGS}"
-  INSTALL_NAME_DIR "${CMAKE_INSTALL_PREFIX}/lib")
+add_library(orocos-kdl SHARED ${KDL_SRCS} ${UTIL_SRCS})
 
-INSTALL_TARGETS( /lib orocos-kdl)
+# make the header public
+# install it to include/hello
+pods_install_headers(${KDL_HPPS} DESTINATION kdl)
+pods_install_headers(${UTIL_HPPS} DESTINATION kdl/utilities)
 
-# CMake 2.2:
-INSTALL_FILES( /include/kdl FILES ${KDL_HPPS})
-INSTALL_FILES( /include/kdl/utilities FILES ${UTIL_HPPS})
+# make the library public
+pods_install_libraries(orocos-kdl)
 
-# Orocos convention:
-CONFIGURE_FILE( kdl.pc.in ${CMAKE_CURRENT_BINARY_DIR}/orocos-kdl.pc @ONLY)
-INSTALL_FILES( /lib/pkgconfig FILES ${CMAKE_CURRENT_BINARY_DIR}/orocos-kdl.pc)
+# uncomment these lines to link against another library via pkg-config
+set(REQUIRED_PACKAGES eigen3)
+pods_use_pkg_config_packages(orocos-kdl ${REQUIRED_PACKAGES})
+
+# create a pkg-config file for the library, to make it easier for other
+# software to use.
+pods_install_pkg_config_file(orocos-kdl
+    CFLAGS
+    LIBS -lorocos-kdl
+    REQUIRES ${REQUIRED_PACKAGES}
+    VERSION 0.0.1)
+
+

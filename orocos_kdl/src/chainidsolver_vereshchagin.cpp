@@ -84,7 +84,7 @@ void ChainIdSolver_Vereshchagin::initial_upwards_sweep(const JntArray &q, const 
 
         //The velocity due to the joint motion of the segment expressed in the segments reference frame (tip)
         Twist vj = s.F.M.Inverse(segment.twist(q(j), qdot(j))); //XDot of each link
-        Twist aj = s.F.M.Inverse(segment.twist(q(j), qdotdot(j))); //XDotDot of each link
+        //Twist aj = s.F.M.Inverse(segment.twist(q(j), qdotdot(j))); //XDotDot of each link
 
         //The unit velocity due to the joint motion of the segment expressed in the segments reference frame (tip)
         s.Z = s.F.M.Inverse(segment.twist(q(j), 1.0));
@@ -124,7 +124,7 @@ void ChainIdSolver_Vereshchagin::initial_upwards_sweep(const JntArray &q, const 
 
 void ChainIdSolver_Vereshchagin::downwards_sweep(const Jacobian& alfa, const JntArray &torques)
 {
-    unsigned int j = nj - 1;
+    int j = nj - 1;
     for (int i = ns; i >= 0; i--)
     {
         //Get a handle for the segment we are working on.
@@ -137,7 +137,7 @@ void ChainIdSolver_Vereshchagin::downwards_sweep(const Jacobian& alfa, const Jnt
         //M is the (unit) acceleration energy already generated at link i
         //G is the (unit) magnitude of the constraint forces at link i
         //E are the (unit) constraint forces due to the constraints
-        if (i == ns)
+        if (i == (int)ns)
         {
             s.P_tilde = s.H;
             s.R_tilde = s.U;
@@ -170,12 +170,13 @@ void ChainIdSolver_Vereshchagin::downwards_sweep(const Jacobian& alfa, const Jnt
             //Copy PZ into a vector so we can do matrix manipulations, put torques above forces
             Vector6d vPZ;
             vPZ << Vector3d::Map(child.PZ.torque.data), Vector3d::Map(child.PZ.force.data);
-            Matrix6d PZDPZt = (vPZ * vPZ.transpose()).lazy();
+            Matrix6d PZDPZt;
+            PZDPZt.noalias() = vPZ * vPZ.transpose();
             PZDPZt /= child.D;
 
             //equation a) (see Vereshchagin89) PZDPZt=[I,H;H',M]
             //Azamat:articulated body inertia as in Featherstone (7.19)
-            s.P_tilde = s.H + child.P - ArticulatedBodyInertia(PZDPZt.corner < 3, 3 > (BottomRight), PZDPZt.corner < 3, 3 > (TopRight), PZDPZt.corner < 3, 3 > (TopLeft));
+            s.P_tilde = s.H + child.P - ArticulatedBodyInertia(PZDPZt.bottomRightCorner<3,3>(), PZDPZt.topRightCorner<3,3>(), PZDPZt.topLeftCorner<3,3>());
             //equation b) (see Vereshchagin89)
             //Azamat: bias force as in Featherstone (7.20)
             s.R_tilde = s.U + child.R + child.PC + (child.PZ / child.D) * child.u;
@@ -183,19 +184,19 @@ void ChainIdSolver_Vereshchagin::downwards_sweep(const Jacobian& alfa, const Jnt
             s.E_tilde = child.E;
 
             //Azamat: equation (c) right side term
-            s.E_tilde -= (vPZ * child.EZ.transpose()).lazy() / child.D;
+            s.E_tilde.noalias() -= (vPZ * child.EZ.transpose()) / child.D;
 
             //equation d) (see Vereshchagin89)
             s.M = child.M;
             //Azamat: equation (d) right side term
-            s.M -= (child.EZ * child.EZ.transpose()).lazy() / child.D;
+            s.M.noalias() -= (child.EZ * child.EZ.transpose()) / child.D;
 
             //equation e) (see Vereshchagin89)
             s.G = child.G;
             Twist CiZDu = child.C + (child.Z / child.D) * child.u;
             Vector6d vCiZDu;
             vCiZDu << Vector3d::Map(CiZDu.rot.data), Vector3d::Map(CiZDu.vel.data);
-            s.G += (child.E.transpose() * vCiZDu).lazy();
+            s.G.noalias() += child.E.transpose() * vCiZDu;
         }
         if (i != 0)
         {
@@ -229,7 +230,7 @@ void ChainIdSolver_Vereshchagin::downwards_sweep(const Jacobian& alfa, const Jnt
             //Matrix form of Z, put rotations above translations
             Vector6d vZ;
             vZ << Vector3d::Map(s.Z.rot.data), Vector3d::Map(s.Z.vel.data);
-            s.EZ = (s.E.transpose() * vZ).lazy();
+            s.EZ.noalias() = s.E.transpose() * vZ;
 
             if (chain.getSegment(i - 1).getJoint().getType() != Joint::None)
                 j--;
@@ -257,19 +258,19 @@ void ChainIdSolver_Vereshchagin::constraint_calculation(const JntArray& beta)
         else
             Sm(i) = 1 / Sm(i);
 
-    results[0].M = (Vm * Sm.asDiagonal()).lazy();
-    M_0_inverse = (results[0].M * Um.transpose()).lazy();
+    results[0].M.noalias() = Vm * Sm.asDiagonal();
+    M_0_inverse.noalias() = results[0].M * Um.transpose();
     //results[0].M.ldlt().solve(MatrixXd::Identity(nc,nc),&M_0_inverse);
     //results[0].M.computeInverse(&M_0_inverse);
     Vector6d acc;
     acc << Vector3d::Map(acc_root.rot.data), Vector3d::Map(acc_root.vel.data);
-    nu_sum = -(results[0].E_tilde.transpose() * acc).lazy();
+    nu_sum.noalias() = -(results[0].E_tilde.transpose() * acc);
     //nu_sum.setZero();
     nu_sum += beta.data;
     nu_sum -= results[0].G;
 
     //equation f) nu = M_0_inverse*(beta_N - E0_tilde`*acc0 - G0)
-    nu = (M_0_inverse * nu_sum).lazy();
+    nu.noalias() = M_0_inverse * nu_sum;
 }
 
 void ChainIdSolver_Vereshchagin::final_upwards_sweep(JntArray &q_dotdot, JntArray &torques)
@@ -330,20 +331,16 @@ void ChainIdSolver_Vereshchagin::getLinkCartesianPose(Frames& x_base)
     }
     return;
 }
-
 void ChainIdSolver_Vereshchagin::getLinkCartesianVelocity(Twists& xDot_base)
 {
-
     for (int i = 0; i < ns; i++)
     {
         xDot_base[i] = results[i + 1].F_base.M * results[i + 1].v;
     }
     return;
 }
-
 void ChainIdSolver_Vereshchagin::getLinkCartesianAcceleration(Twists& xDotDot_base)
 {
-
     for (int i = 0; i < ns; i++)
     {
         xDotDot_base[i] = results[i + 1].F_base.M * results[i + 1].acc;
@@ -351,7 +348,6 @@ void ChainIdSolver_Vereshchagin::getLinkCartesianAcceleration(Twists& xDotDot_ba
     }
     return;
 }
-
 void ChainIdSolver_Vereshchagin::getLinkPose(Frames& x_local)
 {
     for (int i = 0; i < ns; i++)
@@ -360,7 +356,6 @@ void ChainIdSolver_Vereshchagin::getLinkPose(Frames& x_local)
     }
     return;
 }
-
 void ChainIdSolver_Vereshchagin::getLinkVelocity(Twists& xDot_local)
 {
     for (int i = 0; i < ns; i++)
@@ -368,9 +363,7 @@ void ChainIdSolver_Vereshchagin::getLinkVelocity(Twists& xDot_local)
         xDot_local[i] = results[i + 1].v;
     }
     return;
-
 }
-
 void ChainIdSolver_Vereshchagin::getLinkAcceleration(Twists& xDotdot_local)
 {
      for (int i = 0; i < ns; i++)
@@ -378,9 +371,7 @@ void ChainIdSolver_Vereshchagin::getLinkAcceleration(Twists& xDotdot_local)
         xDotdot_local[i] = results[i + 1].acc;
     }
     return;
-
 }
-
 void ChainIdSolver_Vereshchagin::getJointBiasAcceleration(JntArray& bias_q_dotdot)
 {
     for (int i = 0; i < ns; i++)
@@ -389,16 +380,12 @@ void ChainIdSolver_Vereshchagin::getJointBiasAcceleration(JntArray& bias_q_dotdo
         double tmp = results[i + 1].totalBias;
         //this is accelleration
         bias_q_dotdot(i) = tmp / results[i + 1].D;
-
         //s.totalBias = - dot(s.Z, s.R + s.PC);
         //std::cout << "totalBiasAccComponent" << i << ": " << bias_q_dotdot(i) << std::endl;
         //bias_q_dotdot(i) = s.totalBias/s.D
-
     }
     return;
-
 }
-
 void ChainIdSolver_Vereshchagin::getJointConstraintAcceleration(JntArray& constraint_q_dotdot)
 {
     for (int i = 0; i < ns; i++)
@@ -408,15 +395,10 @@ void ChainIdSolver_Vereshchagin::getJointConstraintAcceleration(JntArray& constr
         //s.u = torques(j) + s.totalBias;
         // std::cout << "s.constraintAccComp" << i << ": " << results[i+1].constAccComp << std::endl;
         //nullspace_q_dotdot(i) = s.u/s.D
-
     }
     return;
-
-
 }
-
 //Check the name it does not seem to be appropriate
-
 void ChainIdSolver_Vereshchagin::getJointNullSpaceAcceleration(JntArray& nullspace_q_dotdot)
 {
     for (int i = 0; i < ns; i++)
@@ -426,17 +408,12 @@ void ChainIdSolver_Vereshchagin::getJointNullSpaceAcceleration(JntArray& nullspa
         //s.u = torques(j) + s.totalBias;
         //std::cout << "s.nullSpaceAccComp" << i << ": " << results[i+1].nullspaceAccComp << std::endl;
         //nullspace_q_dotdot(i) = s.u/s.D
-
     }
     return;
-
-
 }
-
 //This is not only a bias force energy but also includes generalized forces
 //change type of parameter G
 //this method should retur array of G's
-
 void ChainIdSolver_Vereshchagin::getLinkBiasForceAcceleratoinEnergy(Eigen::VectorXd& G)
 {
     for (int i = 0; i < ns; i++)
@@ -446,14 +423,10 @@ void ChainIdSolver_Vereshchagin::getLinkBiasForceAcceleratoinEnergy(Eigen::Vecto
         //s.u = torques(j) + s.totalBias;
         //std::cout << "s.G " << i << ":  " << results[i+1].G << std::endl;
         //nullspace_q_dotdot(i) = s.u/s.D
-
     }
     return;
-
 }
-
 //this method should retur array of R's
-
 void ChainIdSolver_Vereshchagin::getLinkBiasForceMatrix(Wrenches& R_tilde)
 {
     for (int i = 0; i < ns; i++)
@@ -465,7 +438,6 @@ void ChainIdSolver_Vereshchagin::getLinkBiasForceMatrix(Wrenches& R_tilde)
     }
     return;
 }
-
 */
 
 }//namespace
